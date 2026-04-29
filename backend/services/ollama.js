@@ -1,21 +1,22 @@
-import dotenv from "dotenv"
-import axios from "axios"
+import axios from "axios";
+import dotenv from "dotenv";
 dotenv.config();
 
-export const OLLAMA_URL = process.env.OLLAMA_URL;
-export const GEN_MODEL = process.env.GEN_MODEL;
-
-export async function ollamaChat(messages,{model = GEN_MODEL, stream = false} = {}) {
-    try {
-        const {data} = await axios.post(`${OLLAMA_URL}/api/chat`,{
-            model,
-            messages,
-            stream
-        })
-
-        return data?.message?.content ?? ""
-    } catch (error) {
-        console.error("ollamaChatErrror",error.message)
-    }
-    
+export async function ollamaChat(messages, { model = process.env.GROQ_MODEL } = {}) {
+  try {
+    const { data } = await axios.post(
+      "https://api.groq.com/openai/v1/chat/completions",
+      { model, messages },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    return data?.choices?.[0]?.message?.content ?? "";
+  } catch (error) {
+    console.error("Groq chat error", error.message);
+    return "";
+  }
 }
