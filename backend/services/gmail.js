@@ -1,26 +1,21 @@
-import Mailjet from "node-mailjet";
+import { Resend } from "resend";
 
-const mailjet = Mailjet.apiConnect(
-  process.env.MAILJET_API_KEY,
-  process.env.MAILJET_SECRET_KEY
-);
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export const SendEmail = async ({ to, subject, html }) => {
   try {
-    const result = await mailjet.post("send", { version: "v3.1" }).request({
-      Messages: [
-        {
-          From: {
-            Email: process.env.MAIL_USER,
-            Name: "Health Management System",
-          },
-          To: [{ Email: to }],
-          Subject: subject,
-          HTMLPart: html,
-        },
-      ],
+    const { data, error } = await resend.emails.send({
+      from: "onboarding@resend.dev",
+      to: process.env.RESEND_TO_EMAIL,
+      subject,
+      html,
     });
-    return result;
+
+    if (error) {
+      console.error("Error sending email", error);
+    }
+
+    return data;
   } catch (error) {
     console.error("Error sending email", error.message);
   }
