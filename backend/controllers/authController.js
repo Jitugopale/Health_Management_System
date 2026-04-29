@@ -47,7 +47,19 @@ export const RegisterPatientController = async (req, res) => {
     const userId = await generatePatientUserId(pool);
     const hashPassword = hashSync(password, 10);
 
-    await SendEmail({
+    const result = await pool.query(
+      `INSERT INTO users (name, "userId", email, password, "phoneNo", gender, age)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [name, userId, email, hashPassword, phoneNo, gender, age]
+    );
+
+    res.status(201).json({
+      message: "Patient registered Successfully",
+      user: result.rows[0],
+    });
+
+    SendEmail({
       to: email,
       subject: "Your Patient Account Credentials",
       html: `
@@ -66,19 +78,7 @@ export const RegisterPatientController = async (req, res) => {
           </p>
         </div>
             `,
-    });
-
-    const result = await pool.query(
-      `INSERT INTO users (name, "userId", email, password, "phoneNo", gender, age)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING *`,
-      [name, userId, email, hashPassword, phoneNo, gender, age]
-    );
-
-    return res.status(201).json({
-      message: "Patient registered Successfully",
-      user: result.rows[0],
-    });
+    }).catch((err) => console.error("Email error:", err));
   } catch (error) {
     return res.status(500).json({ message: "Something Went Wrong" });
   }
@@ -225,7 +225,18 @@ export const UpdatePasswordController = async (req, res) => {
     const email = user.email;
     const hashPassword = hashSync(newPassword, 10);
 
-    await SendEmail({
+    const updateResult = await pool.query(
+      `UPDATE users SET password = $1 WHERE "userId" = $2
+       RETURNING "userId", name, email, role, "phoneNo", gender, age`,
+      [hashPassword, userId]
+    );
+
+    res.status(200).json({
+      message: "Password Updated Successfully",
+      user: updateResult.rows[0],
+    });
+
+    SendEmail({
       to: email,
       subject: `Your ${role} Account Credentials`,
       html: `
@@ -243,18 +254,7 @@ export const UpdatePasswordController = async (req, res) => {
           </p>
         </div>
             `,
-    });
-
-    const updateResult = await pool.query(
-      `UPDATE users SET password = $1 WHERE "userId" = $2
-       RETURNING "userId", name, email, role, "phoneNo", gender, age`,
-      [hashPassword, userId]
-    );
-
-    return res.status(200).json({
-      message: "Password Updated Successfully",
-      user: updateResult.rows[0],
-    });
+    }).catch((err) => console.error("Email error:", err));
   } catch (error) {
     return res.status(500).json({ message: "Something Went Wrong" });
   }

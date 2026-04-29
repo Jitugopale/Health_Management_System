@@ -67,7 +67,13 @@ export const CreateDoctorController = async (req, res) => {
       [name, email, userId, specialization, experience, qualification, phoneNo]
     );
 
-    await SendEmail({
+    res.status(201).json({
+      message: "Doctor Created Successfully",
+      users: users.rows[0],
+      doctor: doctors.rows[0],
+    });
+
+    SendEmail({
       to: email,
       subject: "Your Doctor Account Details",
       html: `
@@ -86,13 +92,7 @@ export const CreateDoctorController = async (req, res) => {
           </p>
         </div>
       `,
-    });
-
-    return res.status(201).json({
-      message: "Doctor Created Successfully",
-      users: users.rows[0],
-      doctor: doctors.rows[0],
-    });
+    }).catch((err) => console.error("Email error:", err));
   } catch (error) {
     return res.status(500).json({ message: "Something went wrong" });
   }
