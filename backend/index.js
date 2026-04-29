@@ -15,6 +15,10 @@ app.use(cors({
 
 const PORT=process.env.PORT;
 
+app.get('/',(req,res)=>{
+    res.send("Backend Running");
+})
+
 app.use('/api',rootRouter)
 
 app.listen(PORT,()=>{
