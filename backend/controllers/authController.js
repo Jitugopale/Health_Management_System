@@ -1,25 +1,24 @@
-import { getPool, sql } from "../db/db.js";
+import { getPool } from "../db/db.js";
 import { compareSync, hashSync } from "bcrypt";
 import { SendEmail } from "../services/gmail.js";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.JWT_SECRET;
+
 const generatePatientUserId = async (pool) => {
-  const result = await pool.request().query(`
-        SELECT TOP 1 userId
-        FROM users
-        where role = 'PATIENT' AND userId LIKE 'PAT%' 
-        ORDER BY id DESC`);
+  const result = await pool.query(`
+    SELECT "userId" FROM users
+    WHERE role = 'PATIENT' AND "userId" LIKE 'PAT%'
+    ORDER BY id DESC LIMIT 1`);
 
-  if (result.recordset.length === 0) {
-    return "PAT001";
-  }
+  if (result.rows.length === 0) return "PAT001";
 
-  const lastId = result.recordset[0].userId;
+  const lastId = result.rows[0].userId;
   const numericPart = parseInt(lastId.slice(3));
   const newNumericPart = (numericPart + 1).toString().padStart(3, "0");
   return `PAT${newNumericPart}`;
 };
+
 export const RegisterPatientController = async (req, res) => {
   try {
     const { name, email, password, phoneNo, gender, age } = req.body;
@@ -34,20 +33,18 @@ export const RegisterPatientController = async (req, res) => {
 
     const pool = await getPool();
 
-    const existingUser = await pool
-      .request()
-      .input("email", sql.VarChar, email)
-      .query(`SELECT * FROM users WHERE email = @email`);
+    const existingUser = await pool.query(
+      `SELECT * FROM users WHERE email = $1`, [email]
+    );
 
-    if (existingUser.recordset.length > 0) {
+    if (existingUser.rows.length > 0) {
       return res.status(400).json({
         message: "User Already exists",
-        existingUser: existingUser.recordset[0],
+        existingUser: existingUser.rows[0],
       });
     }
 
     const userId = await generatePatientUserId(pool);
-
     const hashPassword = hashSync(password, 10);
 
     await SendEmail({
@@ -71,22 +68,16 @@ export const RegisterPatientController = async (req, res) => {
             `,
     });
 
-    const result = await pool
-      .request()
-      .input("name", sql.VarChar, name)
-      .input("userId", sql.VarChar, userId)
-      .input("email", sql.VarChar, email)
-      .input("password", sql.VarChar, hashPassword)
-      .input("phoneNo", sql.VarChar, phoneNo)
-      .input("gender", sql.VarChar, gender)
-      .input("age", sql.Int, age).query(`
-            INSERT INTO users(name, userId, email, password, phoneNo, gender, age)
-            OUTPUT INSERTED. *
-            VALUES (@name, @userId, @email, @password, @phoneNo, @gender, @age)`);
+    const result = await pool.query(
+      `INSERT INTO users (name, "userId", email, password, "phoneNo", gender, age)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [name, userId, email, hashPassword, phoneNo, gender, age]
+    );
 
     return res.status(201).json({
       message: "Patient registered Successfully",
-      user: result.recordset[0],
+      user: result.rows[0],
     });
   } catch (error) {
     return res.status(500).json({ message: "Something Went Wrong" });
@@ -100,18 +91,12 @@ export const LoginController = async (req, res) => {
     return res.status(400).json({ message: "All fields are required" });
   }
 
-  if (
-    userId === process.env.ADMIN_ID &&
-    password === process.env.ADMIN_PASSWORD
-  ) {
+  if (userId === process.env.ADMIN_ID && password === process.env.ADMIN_PASSWORD) {
     const token = jwt.sign(
       { userId: process.env.ADMIN_ID, role: "Admin" },
       JWT_SECRET,
-      {
-        expiresIn: "1d",
-      }
+      { expiresIn: "1d" }
     );
-
     return res.status(200).json({
       message: "Admin Login Successfully",
       token,
@@ -121,12 +106,11 @@ export const LoginController = async (req, res) => {
     try {
       const pool = await getPool();
 
-      const loginRequest = pool.request();
-      const result = await loginRequest.input("userId", sql.VarChar, userId)
-        .query(`
-            SELECT * FROM users where userId = @userId`);
+      const result = await pool.query(
+        `SELECT * FROM users WHERE "userId" = $1`, [userId]
+      );
 
-      const user = result.recordset[0];
+      const user = result.rows[0];
 
       if (!user) {
         return res.status(404).json({ message: "User not Found" });
@@ -158,21 +142,17 @@ export const getUserController = async (req, res) => {
     const userId = req.user.id;
     const pool = await getPool();
 
-    const getUserRequest = pool.request();
-    const user = await getUserRequest.input("userId", sql.VarChar, userId)
-      .query(`
-            SELECT * FROM users WHERE userId = @userId
-            `);
+    const result = await pool.query(
+      `SELECT * FROM users WHERE "userId" = $1`, [userId]
+    );
 
-    if (user.recordset.length === 0) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const userData = user.recordset[0];
-
     return res.status(200).json({
       message: "User fetched Successfully",
-      user: userData,
+      user: result.rows[0],
     });
   } catch (error) {
     return res.status(500).json({ message: "Something Went Wrong" });
@@ -182,7 +162,6 @@ export const getUserController = async (req, res) => {
 export const UpdateUserController = async (req, res) => {
   try {
     const userId = req.user.id;
-
     const { name, email, phoneNo, gender, age } = req.body;
 
     if (!name || !email || !phoneNo || !gender || !age) {
@@ -191,39 +170,25 @@ export const UpdateUserController = async (req, res) => {
 
     const pool = await getPool();
 
-    const checkUser = await pool
-      .request()
-      .input("userId", sql.VarChar, userId)
-      .query("SELECT * FROM users WHERE userId = @userId");
+    const checkUser = await pool.query(
+      `SELECT * FROM users WHERE "userId" = $1`, [userId]
+    );
 
-    if (checkUser.recordset.length === 0) {
+    if (checkUser.rows.length === 0) {
       return res.status(404).json({ message: "User not Found" });
     }
 
-    const updateRequest = pool
-      .request()
-      .input("name", sql.VarChar, name)
-      .input("userId", sql.VarChar, userId)
-      .input("email", sql.VarChar, email)
-      .input("phoneNo", sql.VarChar, phoneNo)
-      .input("gender", sql.VarChar, gender)
-      .input("age", sql.Int, age);
-
-    const updatedUser = await updateRequest.query(`
-        UPDATE users
-        SET name = @name,
-            email = @email,
-            phoneNo = @phoneNo,
-            gender = @gender,
-            age = @age
-            WHERE userId = @userId;
-
-            SELECT * FROM users WHERE userId = @userId;
-        `);
+    const updatedUser = await pool.query(
+      `UPDATE users
+       SET name = $1, email = $2, "phoneNo" = $3, gender = $4, age = $5
+       WHERE "userId" = $6
+       RETURNING *`,
+      [name, email, phoneNo, gender, age, userId]
+    );
 
     return res.status(200).json({
       message: "User Updated Successfully",
-      user: updatedUser.recordset[0],
+      user: updatedUser.rows[0],
     });
   } catch (error) {
     return res.status(500).json({ message: "Something Went Wrong" });
@@ -247,12 +212,11 @@ export const UpdatePasswordController = async (req, res) => {
 
     const pool = await getPool();
 
-    const userResult = await pool
-      .request()
-      .input("userId", sql.VarChar, userId)
-      .query(`SELECT email from users WHERE userId = @userId`);
+    const userResult = await pool.query(
+      `SELECT email FROM users WHERE "userId" = $1`, [userId]
+    );
 
-    const user = userResult.recordset[0];
+    const user = userResult.rows[0];
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -281,98 +245,81 @@ export const UpdatePasswordController = async (req, res) => {
             `,
     });
 
-    const updateResult = await pool
-    .request()
-    .input("userId",sql.VarChar,userId)
-    .input("password",sql.VarChar,hashPassword)
-    .query(`
-        UPDATE users
-        SET password = @password
-        WHERE userId = @userId;
-
-        SELECT userId,name,email,role,phoneNo,gender,age
-        FROM users
-        WHERE userId = @userId
-        `)
+    const updateResult = await pool.query(
+      `UPDATE users SET password = $1 WHERE "userId" = $2
+       RETURNING "userId", name, email, role, "phoneNo", gender, age`,
+      [hashPassword, userId]
+    );
 
     return res.status(200).json({
-        message:"Password Updated Successfully",
-        user:updateResult.recordset[0]
-    })
-    
+      message: "Password Updated Successfully",
+      user: updateResult.rows[0],
+    });
   } catch (error) {
     return res.status(500).json({ message: "Something Went Wrong" });
   }
 };
 
-export const sendMessageController = async(req,res)=>{
+export const sendMessageController = async (req, res) => {
   try {
-    const {appointmentId, receiverId, message} = req.body;
+    const { appointmentId, receiverId, message } = req.body;
 
-    if(!appointmentId || !receiverId || !message){
-      return res.status(400).json({message:"All fields are required"})
+    if (!appointmentId || !receiverId || !message) {
+      return res.status(400).json({ message: "All fields are required" });
     }
 
     const pool = await getPool();
 
-    const appointmentCheck = await pool.request()
-    .input("appointmentId",sql.VarChar,appointmentId)
-    .query(`
-      SELECT status FROM appointments WHERE appointmentId = @appointmentId
-      `)
+    const appointmentCheck = await pool.query(
+      `SELECT status FROM appointments WHERE "appointmentId" = $1`, [appointmentId]
+    );
 
-      if(appointmentCheck.recordset.length ===0){
-        return res.status(404).json({message:"Appointment not found"})
-      }
+    if (appointmentCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Appointment not found" });
+    }
 
-      const status = appointmentCheck.recordset[0].status;
+    const status = appointmentCheck.rows[0].status;
 
-      if(status !== "BOOKED"){
-        return res.status(403).json({message:"You can only send messages for booked appointments"})
-      }
+    if (status !== "BOOKED") {
+      return res.status(403).json({ message: "You can only send messages for booked appointments" });
+    }
 
-      const result = await pool.request()
-      .input("appointmentId",sql.VarChar,appointmentId)
-      .input("senderId",sql.VarChar,req.user.id)
-      .input("receiverId",sql.VarChar,receiverId)
-      .input("message",sql.VarChar,message)
-      .query(`
-        INSERT INTO chats (appointmentId, senderId, receiverId, message)
-        OUTPUT INSERTED.*
-        VALUES (@appointmentId, @senderId, @receiverId, @message)
-        `)
+    const result = await pool.query(
+      `INSERT INTO chats ("appointmentId", "senderId", "receiverId", message)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [appointmentId, req.user.id, receiverId, message]
+    );
 
-        return res.status(201).json({
-          message:"Message Sent Successfully",
-          chat:result.recordset[0]
-        })
+    return res.status(201).json({
+      message: "Message Sent Successfully",
+      chat: result.rows[0],
+    });
   } catch (error) {
     return res.status(500).json({ message: "Something Went Wrong" });
   }
-}
+};
 
-export const getChatHistoryController = async(req,res)=>{
+export const getChatHistoryController = async (req, res) => {
   try {
-    const {appointmentId} = req.params;
+    const { appointmentId } = req.params;
 
-    if(!appointmentId){
-      return res.status(400).json({message:"appointmentId is required"})
+    if (!appointmentId) {
+      return res.status(400).json({ message: "appointmentId is required" });
     }
 
     const pool = await getPool();
 
-    const result = await pool.request()
-    .input("appointmentId",sql.VarChar,appointmentId)
-    .query(`
-      SELECT * FROM chats WHERE appointmentId = @appointmentId 
-      ORDER BY createdAt ASC
-      `)
+    const result = await pool.query(
+      `SELECT * FROM chats WHERE "appointmentId" = $1 ORDER BY "createdAt" ASC`,
+      [appointmentId]
+    );
 
-        return res.status(201).json({
-          message:"Chat history fetched Successfully",
-          chat:result.recordset
-        })
+    return res.status(201).json({
+      message: "Chat history fetched Successfully",
+      chat: result.rows,
+    });
   } catch (error) {
     return res.status(500).json({ message: "Something Went Wrong" });
   }
-}
+};
